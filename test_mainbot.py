@@ -18,12 +18,10 @@ with patch.dict(os.environ, {
         clone_or_update_repo,
         read_json,
         format_message,
-        format_deactivation_message,
         compare_roles,
         send_message,
         send_messages_to_channels,
         check_for_new_roles,
-        update_expired_role_messages,
         validate_config,
         save_message_tracking,
         load_message_tracking,
@@ -112,13 +110,7 @@ class TestMessageFormatting:
         assert SAMPLE_ROLE['season'] in message
         assert SAMPLE_ROLE['sponsorship'] in message
 
-    def test_format_deactivation_message(self):
-        """Test formatting a message for a deactivated job posting"""
-        message = format_deactivation_message(SAMPLE_ROLE)
-        assert SAMPLE_ROLE['company_name'] in message
-        assert SAMPLE_ROLE['title'] in message
-        assert 'about:blank' in message  # URL is disabled for closed roles
-        assert 'Inactive' in message
+    # Deactivation messages removed — no corresponding test
 
     def test_compare_roles(self):
         """Test comparing two versions of a role to detect changes"""
@@ -174,36 +166,7 @@ class TestDiscordOperations:
             await send_messages_to_channels(test_message, "test_role_key")
             assert mock_send.call_count == len(channel_ids)
 
-    async def test_update_expired_role_messages(self):
-        """Test updating messages when a role expires"""
-        # Setup mock message tracking
-        role_key = "Test Company_Software Engineer Intern"
-        mock_message_tracking = {
-            role_key: [
-                {
-                    'channel_id': '123456789',
-                    'message_id': 999888777,
-                    'timestamp': datetime.now()
-                }
-            ]
-        }
-        
-        channel = AsyncMock()
-        message = AsyncMock()
-        channel.fetch_message = AsyncMock(return_value=message)
-        message.edit = AsyncMock()
-        
-        with patch('mainbot.message_tracking', mock_message_tracking), \
-             patch('mainbot.bot') as mock_bot:
-            mock_bot.get_channel = Mock(return_value=channel)
-            
-            await update_expired_role_messages(SAMPLE_ROLE)
-            
-            channel.fetch_message.assert_called_once_with(999888777)
-            message.edit.assert_called_once()
-            
-            # Check that the role was removed from tracking
-            assert role_key not in mock_message_tracking
+    # Message update-on-deactivation behavior removed — no corresponding test
 
 @pytest.mark.asyncio
 class TestRoleChecking:
@@ -292,24 +255,18 @@ class TestRoleChecking:
             mock_send.return_value = asyncio.Future()
             mock_send.return_value.set_result(None)
             
-            # Mock update_expired_role_messages
-            with patch('mainbot.update_expired_role_messages') as mock_update:
-                mock_update.return_value = asyncio.Future()
-                mock_update.return_value.set_result(None)
-                
-                async def async_check_for_new_roles():
-                    check_for_new_roles()
-                    future = asyncio.Future()
-                    future.set_result(None)
-                    return future
-                
-                with patch('mainbot.check_for_new_roles', async_check_for_new_roles):
-                    await async_check_for_new_roles()
-                
-                mock_clone.assert_called_once()
-                mock_read.assert_called_once()
-                # Check that create_task was called with update_expired_role_messages
-                mock_loop.create_task.assert_called()
+            async def async_check_for_new_roles():
+                check_for_new_roles()
+                future = asyncio.Future()
+                future.set_result(None)
+                return future
+
+            with patch('mainbot.check_for_new_roles', async_check_for_new_roles):
+                await async_check_for_new_roles()
+
+            mock_clone.assert_called_once()
+            mock_read.assert_called_once()
+            mock_loop.create_task.assert_called()
 
 class TestConfigurationValidation:
     """Test suite for configuration validation"""
