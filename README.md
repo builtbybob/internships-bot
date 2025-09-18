@@ -19,25 +19,6 @@ This project is a Discord bot designed to monitor a GitHub repository for new in
 - One or more Discord channel IDs
 - (Optional) System logrotate for log management
 
-### Configuration
-
-The bot uses environment variables for configuration. Copy the `.env.example` file to `.env` and configure:
-
-```ini
-# Discord Bot Configuration
-DISCORD_TOKEN=your_discord_bot_token_here      # Required: Your Discord bot token
-CHANNEL_IDS=123456789,987654321               # Required: Comma-separated list of channel IDs
-
-# Repository Configuration
-REPO_URL=https://github.com/SimplifyJobs/Summer2026-Internships.git  # Optional: Default shown
-LOCAL_REPO_PATH=Summer2026-Internships        # Optional: Local path for the repo
-
-# Bot Configuration
-MAX_RETRIES=3                                 # Optional: Max retries for failed channels
-CHECK_INTERVAL_MINUTES=1                      # Optional: Minutes between repo checks
-LOG_LEVEL=INFO                                # Optional: Logging level (INFO/DEBUG/etc)
-```
-
 ### Installation
 
 1. Clone the repository:
@@ -56,6 +37,25 @@ LOG_LEVEL=INFO                                # Optional: Logging level (INFO/DE
     - Enable the "Message Content Intent" in the Bot section.
     - Copy the bot token and set it in your `.env` file.
     - Get the channel IDs where you want the bot to send messages and set them in `CHANNEL_IDS`.
+
+### Configuration
+
+The bot uses environment variables for configuration. Copy the `.env.example` file to `.env` and configure:
+
+```ini
+# Discord Bot Configuration
+DISCORD_TOKEN=your_discord_bot_token_here      # Required: Your Discord bot token
+CHANNEL_IDS=123456789,987654321               # Required: Comma-separated list of channel IDs
+
+# Repository Configuration
+REPO_URL=https://github.com/SimplifyJobs/Summer2026-Internships.git  # Optional: Default shown
+LOCAL_REPO_PATH=Summer2026-Internships        # Optional: Local path for the repo
+
+# Bot Configuration
+MAX_RETRIES=3                                 # Optional: Max retries for failed channels
+CHECK_INTERVAL_MINUTES=1                      # Optional: Minutes between repo checks
+LOG_LEVEL=INFO                                # Optional: Logging level (INFO/DEBUG/etc)
+```
 
 ## Log Management
 
