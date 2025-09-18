@@ -1,6 +1,7 @@
 # Standard library imports
 import asyncio
 from datetime import datetime
+import heapq
 import json
 import logging
 from logging import Logger
@@ -56,7 +57,7 @@ def validate_config():
 validate_config()
 
 # Constants from environment variables
-REPO_URL = os.getenv('REPO_URL', 'https://github.com/cvrve/Summer2026-Internships')
+REPO_URL = os.getenv('REPO_URL', 'https://github.com/SimplifyJobs/Summer2026-Internships.git')
 LOCAL_REPO_PATH = os.getenv('LOCAL_REPO_PATH', 'Summer2026-Internships')
 JSON_FILE_PATH = os.path.join(LOCAL_REPO_PATH, '.github', 'scripts', 'listings.json')
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -144,6 +145,14 @@ def normalize_role_key(role):
     return f"{norm(role.get('company_name'))}__{norm(role.get('title'))}"
 
 
+def format_epoch(val):
+    """
+    Format Unix timestamp (seconds) as a human-readable date string.
+    Returns a formatted date string in the format 'September, 15 @ 07:13 PM'.
+    """
+    return datetime.fromtimestamp(val).strftime('%B, %d @ %I:%M %p')
+
+
 # Function to format the message
 def format_message(role):
     """
@@ -159,36 +168,12 @@ def format_message(role):
     url = role.get('url', '').strip() if role.get('url') else ''
     locations = role.get('locations') or []
     location_str = ' | '.join(locations) if locations else 'Not specified'
-    season = role.get('season')
+    terms = role.get('terms') or []
+    term_str = ' | '.join(terms) if terms else 'Not specified'
     sponsorship = role.get('sponsorship')
 
-    # Timestamp format: "September, 15 @ 07:13 PM"
-    def format_epoch(val):
-        """Accept epoch seconds (int or str). If value looks like milliseconds, normalize to seconds."""
-        try:
-            if val is None:
-                return None
-            v = int(val)
-            # If epoch looks like milliseconds (>
-            if v > 10**12:
-                v = v // 1000
-            # If epoch looks like microseconds
-            if v > 10**10:
-                v = v // 1000
-            dt = datetime.fromtimestamp(v)
-            return dt.strftime('%B, %d @ %I:%M %p')
-        except Exception:
-            return None
-
-    posted_on = None
-    # Prefer date_posted, then date_updated, then now
-    for candidate in ('date_posted', 'date_updated'):
-        if role.get(candidate):
-            posted_on = format_epoch(role.get(candidate))
-            if posted_on:
-                break
-    if not posted_on:
-        posted_on = datetime.now().strftime('%B, %d @ %I:%M %p')
+    # Format the posting date
+    posted_on = format_epoch(role.get('date_posted'))
 
     # Header link uses angle-bracketed URL per example
     header_link = f"(<{url}>)" if url else ""
@@ -196,12 +181,16 @@ def format_message(role):
     parts = []
     parts.append(f">>> ## {company}")
     parts.append(f"## [{title}]{header_link}")
+
+    # Add locations
     parts.append("### Locations: ")
     parts.append(location_str)
 
-    # Conditionally include Season and Sponsorship
-    if season and str(season).strip().lower() != 'summer':
-        parts.append(f"### Season: `{season}`")
+    # Add terms
+    if len(terms) > 0 and term_str != 'Summer 2026':
+        parts.append(f"### Terms: `{term_str}`")
+
+    # Conditionally include Sponsorship
     if sponsorship and str(sponsorship).strip().lower() != 'other':
         parts.append(f"### Sponsorship: `{sponsorship}`")
 
@@ -263,13 +252,13 @@ async def send_message(message, channel_id, role_key=None):
                 return
 
         sent_message = await channel.send(message)
-        logger.info(f"Successfully sent message to channel {channel_id}")
+        logger.debug(f"Successfully sent message to channel {channel_id}")
         
         # Reset failure count on success
         if channel_id in channel_failure_counts:
             del channel_failure_counts[channel_id]
         
-        await asyncio.sleep(2)  # Rate limiting delay
+        await asyncio.sleep(1)  # Rate limiting delay
         
     except Exception as e:
         logger.error(f"Error sending message to channel {channel_id}: {e}")
@@ -294,7 +283,7 @@ async def send_messages_to_channels(message, role_key=None):
     # Wait for all messages to be sent
     await asyncio.gather(*tasks, return_exceptions=True)
 
-def check_for_new_roles():
+async def check_for_new_roles():
     """
     The function checks for new roles, sending appropriate messages to Discord channels.
     Only processes the full comparison if the repository was updated.
@@ -317,8 +306,9 @@ def check_for_new_roles():
         old_data = []
         logger.debug("No previous data found.")
 
-    new_roles = []
-
+    # Initialize a priority queue for new roles
+    new_roles_heap = []
+    
     # Create a dictionary for quick lookup of old roles using normalized keys
     old_roles_dict = { normalize_role_key(role): role for role in old_data }
 
@@ -328,16 +318,28 @@ def check_for_new_roles():
         # Get boolean values directly since they are stored as proper booleans
         new_active = new_role.get('active', False)
         new_is_visible = new_role.get('is_visible', True)  # Default to True since all existing entries use True
-
+        
+        # Check for new, visible, and active roles only
         if not old_role and new_is_visible and new_active:
-            new_roles.append(new_role)
-            logger.info(f"New role found: {new_role['title']} at {new_role['company_name']}")
+            # Check if the role was updated within the last 5 days
+            days_since_posted = (datetime.now().timestamp() - new_role['date_posted']) / (24 * 60 * 60)
+            if days_since_posted <= 5:
+                # Add to priority queue in chronological order (oldest first)
+                # Using (timestamp, counter) as the key to ensure unique ordering
+                counter = len(new_roles_heap)  # Use length as a unique secondary key
+                heapq.heappush(new_roles_heap, (new_role['date_posted'], counter, new_role))
+                logger.debug(f"New role found: {new_role['title']} at {new_role['company_name']}")
+            else:
+                logger.debug(f"Skipping old role: {new_role['title']} at {new_role['company_name']} (posted {days_since_posted:.1f} days ago)")
 
-    # Handle new roles
-    for role in new_roles:
+    logger.debug(f"Found {len(new_roles_heap)} new roles, processing in chronological order")
+
+    # Process roles in order (oldest first)
+    while new_roles_heap:
+        _, _, role = heapq.heappop(new_roles_heap)  # Unpack timestamp, counter, and role
         role_key = normalize_role_key(role)
         message = format_message(role)
-        bot.loop.create_task(send_messages_to_channels(message, role_key))
+        await send_messages_to_channels(message, role_key)
 
     # Update previous data
     with open('previous_data.json', 'w') as file:
@@ -353,12 +355,12 @@ async def on_ready():
     logger.info(f'Bot is ready and monitoring {len(CHANNEL_IDS)} channels')
 
     # Initial check for new roles on startup
-    check_for_new_roles()
+    await check_for_new_roles()
 
     # Start the scheduled job loop
     while True:
-        schedule.run_pending()
-        await asyncio.sleep(1)
+        schedule.run_pending()  # This will respect the CHECK_INTERVAL_MINUTES setting
+        await asyncio.sleep(1)  # Small delay to prevent busy-waiting
 
 # Graceful shutdown handler
 def signal_handler(sig, frame):
@@ -369,8 +371,16 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
+# Wrapper for the async function to work with schedule
+def run_check_for_new_roles():
+    """Wrapper to run the async check_for_new_roles in the bot's event loop"""
+    if bot.loop.is_running():
+        bot.loop.create_task(check_for_new_roles())
+    else:
+        logger.warning("Bot event loop is not running, skipping scheduled check")
+
 # Schedule the job with configurable interval
-schedule.every(CHECK_INTERVAL_MINUTES).minutes.do(check_for_new_roles)
+schedule.every(CHECK_INTERVAL_MINUTES).minutes.do(run_check_for_new_roles)
 
 def main():
     """Main function to run the bot"""
