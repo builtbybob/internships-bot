@@ -1,5 +1,5 @@
 # Environment
-.env/
+.env
 env/
 .venv/
 venv/
@@ -25,3 +25,4 @@ nohup.out
 # Bot data files
 message_tracking.json
 previous_data.json
+current_head.txt
